@@ -1,0 +1,2 @@
+- pipeline.id: vulnerabilities
+  path.config: "/usr/share/logstash/pipeline/vulnerabilities.conf"

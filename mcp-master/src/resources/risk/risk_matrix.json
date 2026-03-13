@@ -1,0 +1,18 @@
+{
+  "low": {
+    "description": "Actividad sospechosa limitada, bajo impacto",
+    "action": "Monitorear"
+  },
+  "medium": {
+    "description": "Actividad repetitiva o automatizada",
+    "action": "Evaluar bloqueo"
+  },
+  "high": {
+    "description": "Ataque activo o intento de compromiso",
+    "action": "Bloqueo inmediato"
+  },
+  "critical": {
+    "description": "Compromiso confirmado o explotación activa",
+    "action": "Bloqueo + escalamiento SOC"
+  }
+}

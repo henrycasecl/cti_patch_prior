@@ -1,0 +1,130 @@
+import { z } from "zod";
+import { server } from "../../server.js";
+import fs from "fs";
+import path from "path";
+
+const KEV_URL =
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+
+const DATA_DIR = path.resolve("data");
+const KEV_FILE = path.join(DATA_DIR, "kev.json");
+const META_FILE = path.join(DATA_DIR, "kev.meta.json");
+
+/* ============================
+   Helpers
+============================ */
+function todayISO() {
+    return new Date().toISOString().split("T")[0];
+}
+
+async function fetchKevDatabase() {
+    const res = await fetch(KEV_URL, {
+        headers: {
+            accept: "application/json",
+            "user-agent": "mcp-server/1.0 (kev-lookup)",
+        },
+    });
+
+    if (!res.ok) {
+        throw new Error(`HTTP ${res.status} al descargar KEV`);
+    }
+
+    return res.json();
+}
+
+function isKevUpToDate(): boolean {
+    if (!fs.existsSync(META_FILE)) return false;
+
+    const meta = JSON.parse(fs.readFileSync(META_FILE, "utf-8"));
+    return meta.lastUpdated === todayISO();
+}
+
+async function ensureKevDatabase() {
+    if (fs.existsSync(KEV_FILE) && isKevUpToDate()) {
+        return;
+    }
+
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    const kevData = await fetchKevDatabase();
+
+    fs.writeFileSync(KEV_FILE, JSON.stringify(kevData, null, 2));
+    fs.writeFileSync(
+        META_FILE,
+        JSON.stringify({ lastUpdated: todayISO() }, null, 2)
+    );
+}
+
+/* ============================
+   Tool MCP
+============================ */
+export function registerKevLookupTool() {
+    server.registerTool(
+        "kev_lookup",
+        {
+            title: "Consultar KEV (CISA Known Exploited Vulnerabilities)",
+            description:
+                "Verifica si un CVE se encuentra en la base de datos KEV de CISA, indicando explotación activa.",
+            inputSchema: z.object({
+                cve_id: z
+                    .string()
+                    .regex(/^CVE-\d{4}-\d{4,}$/i, "Formato CVE inválido"),
+            }),
+        },
+        async (input) => {
+            const cveId = input.cve_id.toUpperCase();
+
+            try {
+                await ensureKevDatabase();
+
+                const kevDb = JSON.parse(fs.readFileSync(KEV_FILE, "utf-8"));
+                const vulnerabilities = kevDb?.vulnerabilities ?? [];
+
+                const match = vulnerabilities.find(
+                    (v: any) => v.cveID?.toUpperCase() === cveId
+                );
+
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: match
+                                ? `El CVE ${cveId} se encuentra en la base KEV de CISA.`
+                                : `El CVE ${cveId} NO se encuentra en la base KEV de CISA.`,
+                        },
+                    ],
+                    structuredContent: {
+                        kev: {
+                            is_kev_database: Boolean(match),
+                            date_added: match?.dateAdded || "No encontrado",
+                            ransomware:
+                                match?.knownRansomwareCampaignUse || "No encontrado",
+                            source: match ? "cisa-kev" : "No encontrado",
+                            notes: match?.notes || "No encontrado",
+                        },
+                    },
+                };
+            } catch (err: any) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Error consultando KEV: ${err.message}`,
+                        },
+                    ],
+                    structuredContent: {
+                        kev: {
+                            is_kev_database: false,
+                            date_added: "No encontrado",
+                            ransomware: "No encontrado",
+                            source: "No encontrado",
+                            notes: err.message,
+                        },
+                    },
+                };
+            }
+        }
+    );
+}
